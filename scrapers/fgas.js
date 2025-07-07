@@ -2,7 +2,9 @@ const puppeteer = require("puppeteer");
 const { normalizeCompany } = require("../normalize");
 
 module.exports = async (req, res, next) => {
-  const { companyName = "", city = "", numberOfRecords = 10 } = req.body;
+  let { companyName = "", city = "", numberOfRecords = 5 } = req.body;
+
+  numberOfRecords = 5;
 
   if (!companyName && !city) {
     return res.status(400).json({
@@ -16,40 +18,16 @@ module.exports = async (req, res, next) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-gpu",
-        "--disable-dev-shm-usage",
-        // Add single-process back as it can sometimes help with resource limits
-        "--single-process",
-        // CONSIDER ADDING THIS IF IT STILL FAILS AND YOU SUSPECT CHROMIUM PATH:
-        // '--executablePath': '/usr/bin/chromium', // Common path for system-installed Chromium
-      ],
-      // ABSOLUTELY CRITICAL FOR DEBUGGING ON RAILWAY: Dump all Chromium process output
-      dumpio: true,
-      // ABSURDLY INCREASED: Browser launch timeout
-      timeout: 90000, // 90 seconds for browser launch (was 60s)
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
     const page = await browser.newPage();
-    // ABSURDLY INCREASED: Default navigation timeout for all page operations
-    await page.setDefaultNavigationTimeout(120000); // 120 seconds (2 minutes!)
-
-    // CRITICAL FOR DEBUGGING: Listen for page console messages and errors
-    page.on('console', msg => console.log('PAGE_CONSOLE_LOG:', msg.text()));
-    page.on('pageerror', err => console.error('PAGE_JAVASCRIPT_ERROR:', err.message));
-    page.on('requestfailed', request => console.error('REQUEST_FAILED:', request.url(), request.failure().errorText));
-
     await page.goto("https://fgasregister.com/company-directory/", {
       waitUntil: "networkidle2",
-      // ABSURDLY INCREASED: Specific goto timeout
-      timeout: 120000, // 120 seconds (2 minutes)
     });
 
     // Find iframe with inputs & pagination
-    // ABSURDLY INCREASED: Timeout for iframe selector
-    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]', { timeout: 90000 }); // 90 seconds
+    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]');
     const iframeHandles = await page.$$('iframe');
 
     let inputFrame = null;
@@ -67,7 +45,6 @@ module.exports = async (req, res, next) => {
     }
 
     if (!inputFrame || !paginationFrame) {
-      // If it fails here, you NEED the dumpio and console logs to see why the iframe isn't loading.
       throw new Error("Could not locate input and pagination frames.");
     }
 
@@ -78,10 +55,6 @@ module.exports = async (req, res, next) => {
       const url = response.url();
       if (url.includes("/Activity/401") && response.request().method() === "GET") {
         try {
-          if (!response.ok()) {
-            console.warn(`FGAS API response for ${url} was not OK: ${response.status()}`);
-            return;
-          }
           const json = await response.json();
           const companies = Object.values(json).filter(
             (entry) => entry && typeof entry === "object" && entry.Company
@@ -101,23 +74,20 @@ module.exports = async (req, res, next) => {
 
     // Fill in search inputs
     if (companyName) {
-      // ABSURDLY INCREASED: Timeout for input selector
-      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true, timeout: 60000 }); // 60 seconds
+      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true });
       await inputFrame.type('input[aria-label="Company Name"]', companyName);
     }
 
     if (city) {
-      // ABSURDLY INCREASED: Timeout for input selector
-      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true, timeout: 60000 }); // 60 seconds
+      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true });
       await inputFrame.type('input[aria-label="City"]', city);
     }
 
     // Click search button and wait for first response
     await Promise.all([
-      // ABSURDLY INCREASED: Timeout for first response
       page.waitForResponse(
         (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-        { timeout: 90000 } // 90 seconds
+        { timeout: 15000 }
       ),
       inputFrame.click('button.q-btn.bg-primary'),
     ]);
@@ -135,7 +105,7 @@ module.exports = async (req, res, next) => {
         const buttons = Array.from(document.querySelectorAll('button.q-btn'));
         return buttons.find(btn => {
           const i = btn.querySelector('i');
-          return i && i.textContent.trim() === 'keyboard_arrow_right' && !btn.disabled && !btn.classList.contains('q-btn--disabled');
+          return i && i.textContent.trim() === 'keyboard_arrow_right';
         }) || null;
       });
 
@@ -144,18 +114,17 @@ module.exports = async (req, res, next) => {
         break;
       }
 
-      await Promise.all([
-        // ABSURDLY INCREASED: Timeout for subsequent responses
-        page.waitForResponse(
-          (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-          { timeout: 90000 } // 90 seconds
-        ),
-        nextBtnHandle.asElement().click(),
-      ]);
+  await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
+      { timeout: 15000 }
+    ),
+    nextBtnHandle.asElement().click(),
+  ]);
 
-      // Give it a moment to populate
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+  // Give it a moment to populate
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+}
 
     const normalized = results.slice(0, numberOfRecords).map((entry) =>
       normalizeCompany(entry, "fgas")
