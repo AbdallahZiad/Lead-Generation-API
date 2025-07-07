@@ -21,22 +21,35 @@ module.exports = async (req, res, next) => {
         "--disable-setuid-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
+        // Add single-process back as it can sometimes help with resource limits
+        "--single-process",
+        // CONSIDER ADDING THIS IF IT STILL FAILS AND YOU SUSPECT CHROMIUM PATH:
+        // '--executablePath': '/usr/bin/chromium', // Common path for system-installed Chromium
       ],
-      // INCREASED: Launch timeout
-      timeout: 60000, // Doubled from 30s to 60 seconds for browser launch
+      // ABSOLUTELY CRITICAL FOR DEBUGGING ON RAILWAY: Dump all Chromium process output
+      dumpio: true,
+      // ABSURDLY INCREASED: Browser launch timeout
+      timeout: 90000, // 90 seconds for browser launch (was 60s)
     });
 
     const page = await browser.newPage();
-    // INCREASED: Default navigation timeout for all page operations
-    await page.setDefaultNavigationTimeout(90000); // Increased from 60s to 90 seconds
+    // ABSURDLY INCREASED: Default navigation timeout for all page operations
+    await page.setDefaultNavigationTimeout(120000); // 120 seconds (2 minutes!)
+
+    // CRITICAL FOR DEBUGGING: Listen for page console messages and errors
+    page.on('console', msg => console.log('PAGE_CONSOLE_LOG:', msg.text()));
+    page.on('pageerror', err => console.error('PAGE_JAVASCRIPT_ERROR:', err.message));
+    page.on('requestfailed', request => console.error('REQUEST_FAILED:', request.url(), request.failure().errorText));
 
     await page.goto("https://fgasregister.com/company-directory/", {
       waitUntil: "networkidle2",
+      // ABSURDLY INCREASED: Specific goto timeout
+      timeout: 120000, // 120 seconds (2 minutes)
     });
 
     // Find iframe with inputs & pagination
-    // INCREASED: Timeout for iframe selector
-    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]', { timeout: 60000 }); // Doubled from 30s to 60 seconds
+    // ABSURDLY INCREASED: Timeout for iframe selector
+    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]', { timeout: 90000 }); // 90 seconds
     const iframeHandles = await page.$$('iframe');
 
     let inputFrame = null;
@@ -54,6 +67,7 @@ module.exports = async (req, res, next) => {
     }
 
     if (!inputFrame || !paginationFrame) {
+      // If it fails here, you NEED the dumpio and console logs to see why the iframe isn't loading.
       throw new Error("Could not locate input and pagination frames.");
     }
 
@@ -87,23 +101,23 @@ module.exports = async (req, res, next) => {
 
     // Fill in search inputs
     if (companyName) {
-      // INCREASED: Timeout for input selector
-      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true, timeout: 30000 }); // Increased from 20s to 30 seconds
+      // ABSURDLY INCREASED: Timeout for input selector
+      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true, timeout: 60000 }); // 60 seconds
       await inputFrame.type('input[aria-label="Company Name"]', companyName);
     }
 
     if (city) {
-      // INCREASED: Timeout for input selector
-      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true, timeout: 30000 }); // Increased from 20s to 30 seconds
+      // ABSURDLY INCREASED: Timeout for input selector
+      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true, timeout: 60000 }); // 60 seconds
       await inputFrame.type('input[aria-label="City"]', city);
     }
 
     // Click search button and wait for first response
     await Promise.all([
-      // INCREASED: Timeout for first response
+      // ABSURDLY INCREASED: Timeout for first response
       page.waitForResponse(
         (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-        { timeout: 60000 } // Doubled from 30s to 60 seconds
+        { timeout: 90000 } // 90 seconds
       ),
       inputFrame.click('button.q-btn.bg-primary'),
     ]);
@@ -131,10 +145,10 @@ module.exports = async (req, res, next) => {
       }
 
       await Promise.all([
-        // INCREASED: Timeout for subsequent responses
+        // ABSURDLY INCREASED: Timeout for subsequent responses
         page.waitForResponse(
           (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-          { timeout: 60000 } // Doubled from 30s to 60 seconds
+          { timeout: 90000 } // 90 seconds
         ),
         nextBtnHandle.asElement().click(),
       ]);
