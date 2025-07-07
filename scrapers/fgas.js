@@ -16,28 +16,27 @@ module.exports = async (req, res, next) => {
   try {
     browser = await puppeteer.launch({
       headless: true,
-      // Minimal changes: Add essential arguments for containerized environments
       args: [
-        "--no-sandbox", // Crucial for security in containers
-        "--disable-setuid-sandbox", // Also crucial for security
-        "--disable-gpu", // Often needed for headless Linux environments without a GPU
-        "--disable-dev-shm-usage", // VITAL for limited shared memory in Docker/Railway containers
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-gpu",
+        "--disable-dev-shm-usage",
       ],
-      // Increase launch timeout, as browser startup can be slower on remote hosts
-      timeout: 30000, // Increased from default (30s suggested, could go to 60s if needed)
+      // INCREASED: Launch timeout
+      timeout: 60000, // Doubled from 30s to 60 seconds for browser launch
     });
 
     const page = await browser.newPage();
-    // Minimal change: Increase default navigation timeout for all page operations
-    await page.setDefaultNavigationTimeout(60000); // 60 seconds (was 30s by default)
+    // INCREASED: Default navigation timeout for all page operations
+    await page.setDefaultNavigationTimeout(90000); // Increased from 60s to 90 seconds
 
     await page.goto("https://fgasregister.com/company-directory/", {
       waitUntil: "networkidle2",
     });
 
     // Find iframe with inputs & pagination
-    // Minimal change: Increase timeout for iframe selector
-    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]', { timeout: 30000 }); // Was 15s implicit
+    // INCREASED: Timeout for iframe selector
+    await page.waitForSelector('iframe[src*="sites.shocklogic.com/FGAS/directory"]', { timeout: 60000 }); // Doubled from 30s to 60 seconds
     const iframeHandles = await page.$$('iframe');
 
     let inputFrame = null;
@@ -65,10 +64,9 @@ module.exports = async (req, res, next) => {
       const url = response.url();
       if (url.includes("/Activity/401") && response.request().method() === "GET") {
         try {
-          // Minimal change: Check if response is OK before parsing JSON
           if (!response.ok()) {
             console.warn(`FGAS API response for ${url} was not OK: ${response.status()}`);
-            return; // Don't try to parse non-OK responses
+            return;
           }
           const json = await response.json();
           const companies = Object.values(json).filter(
@@ -89,20 +87,23 @@ module.exports = async (req, res, next) => {
 
     // Fill in search inputs
     if (companyName) {
-      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true, timeout: 20000 }); // Increased timeout
+      // INCREASED: Timeout for input selector
+      await inputFrame.waitForSelector('input[aria-label="Company Name"]', { visible: true, timeout: 30000 }); // Increased from 20s to 30 seconds
       await inputFrame.type('input[aria-label="Company Name"]', companyName);
     }
 
     if (city) {
-      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true, timeout: 20000 }); // Increased timeout
+      // INCREASED: Timeout for input selector
+      await inputFrame.waitForSelector('input[aria-label="City"]', { visible: true, timeout: 30000 }); // Increased from 20s to 30 seconds
       await inputFrame.type('input[aria-label="City"]', city);
     }
 
     // Click search button and wait for first response
     await Promise.all([
+      // INCREASED: Timeout for first response
       page.waitForResponse(
         (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-        { timeout: 30000 } // Minimal change: Increased timeout for response
+        { timeout: 60000 } // Doubled from 30s to 60 seconds
       ),
       inputFrame.click('button.q-btn.bg-primary'),
     ]);
@@ -120,7 +121,6 @@ module.exports = async (req, res, next) => {
         const buttons = Array.from(document.querySelectorAll('button.q-btn'));
         return buttons.find(btn => {
           const i = btn.querySelector('i');
-          // Minimal change: Explicitly check for disabled state on the button
           return i && i.textContent.trim() === 'keyboard_arrow_right' && !btn.disabled && !btn.classList.contains('q-btn--disabled');
         }) || null;
       });
@@ -131,9 +131,10 @@ module.exports = async (req, res, next) => {
       }
 
       await Promise.all([
+        // INCREASED: Timeout for subsequent responses
         page.waitForResponse(
           (res) => res.url().includes("/Activity/401") && res.request().method() === "GET",
-          { timeout: 30000 } // Minimal change: Increased timeout for response
+          { timeout: 60000 } // Doubled from 30s to 60 seconds
         ),
         nextBtnHandle.asElement().click(),
       ]);
